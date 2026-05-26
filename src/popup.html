@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div id="app">
+      <h1>Unspoiled</h1>
+      <div id="search-section">
+        <input
+          type="text"
+          id="show-search"
+          placeholder="Search for a show or movie..."
+          autocomplete="off"
+        />
+        <div id="autocomplete-results"></div>
+      </div>
+      <div id="blocklist-section">
+        <h2>Blocking</h2>
+        <ul id="blocklist"></ul>
+        <p id="empty-state">Nothing blocked yet. Add a show above.</p>
+      </div>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

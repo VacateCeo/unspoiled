@@ -1,0 +1,147 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 320px;
+  min-height: 400px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #0f0f0f;
+  color: #f0f0f0;
+  padding: 16px;
+}
+
+h1 {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  margin-bottom: 16px;
+  color: #ffffff;
+}
+
+h2 {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #888;
+  margin-bottom: 10px;
+}
+
+#show-search {
+  width: 100%;
+  padding: 10px 12px;
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  color: #f0f0f0;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+#show-search:focus {
+  border-color: #555;
+}
+
+#show-search::placeholder {
+  color: #555;
+}
+
+#autocomplete-results {
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  margin-top: 4px;
+  overflow: hidden;
+  display: none;
+}
+
+.autocomplete-item {
+  padding: 10px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: background 0.15s;
+}
+
+.autocomplete-item:hover {
+  background: #2a2a2a;
+}
+
+.autocomplete-item img {
+  width: 32px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: #2a2a2a;
+}
+
+.autocomplete-item .show-info {
+  flex: 1;
+}
+
+.autocomplete-item .show-title {
+  font-weight: 600;
+  color: #f0f0f0;
+}
+
+.autocomplete-item .show-meta {
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+}
+
+#blocklist-section {
+  margin-top: 20px;
+}
+
+#blocklist {
+  list-style: none;
+}
+
+#blocklist li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: #1a1a1a;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+#blocklist li .show-name {
+  font-weight: 500;
+}
+
+#blocklist li .show-year {
+  font-size: 11px;
+  color: #888;
+  margin-left: 6px;
+}
+
+#blocklist li button {
+  background: none;
+  border: none;
+  color: #555;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+  transition: color 0.15s;
+}
+
+#blocklist li button:hover {
+  color: #ff4444;
+}
+
+#empty-state {
+  font-size: 13px;
+  color: #555;
+  text-align: center;
+  margin-top: 12px;
+}
