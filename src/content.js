@@ -3,6 +3,7 @@ const TMDB_BASE = "https://api.themoviedb.org/3";
 const TMDB_IMG = "https://image.tmdb.org/t/p/w92";
 
 const searchInput = document.getElementById("show-search");
+if (!searchInput) return;
 const autocompleteResults = document.getElementById("autocomplete-results");
 const blocklistEl = document.getElementById("blocklist");
 const emptyState = document.getElementById("empty-state");

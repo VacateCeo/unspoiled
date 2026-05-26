@@ -1,5 +1,7 @@
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const TMDB_IMG = "https://image.tmdb.org/t/p/w92";
+const DEFAULT_TMDB_TOKEN =
+  "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIxNWE3NTQ3YTA3YmJhYWI4MDNiZjg2OTY5NWNmYWU4YSIsIm5iZiI6MTc3OTc1NTU2OS41MTAwMDAyLCJzdWIiOiI2YTE0ZWEzMTU3NjQyOTRhYWY1NDVmYjYiLCJzY29wZXMiOlsiYXBpX3JlYWQiXSwidmVyc2lvbiI6MX0.26UDXfdrFPiAEUf4AS4_gDmyc-RcElN3NR6fDABPJqI";
 
 const searchInput = document.getElementById("show-search");
 const autocompleteResults = document.getElementById("autocomplete-results");
@@ -10,10 +12,10 @@ let debounceTimer;
 let blocklist = [];
 let TMDB_TOKEN = "";
 
-// Load token and blocklist from storage
+// Load token and blocklist from storage; fall back to bundled default token
 chrome.storage.local.get(["blocklist", "tmdbToken"], (data) => {
   blocklist = data.blocklist || [];
-  TMDB_TOKEN = data.tmdbToken || "";
+  TMDB_TOKEN = data.tmdbToken || DEFAULT_TMDB_TOKEN;
   renderBlocklist();
 });
 
@@ -53,6 +55,7 @@ async function searchTMDB(query) {
       }
     );
     const data = await res.json();
+    console.log("TMDB response:", JSON.stringify(data));
     const results = data.results
       .filter((r) => r.media_type === "tv" || r.media_type === "movie")
       .slice(0, 5);
