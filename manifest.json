@@ -14,7 +14,8 @@
     "https://www.reddit.com/*",
     "https://www.youtube.com/*",
     "https://api.themoviedb.org/*",
-    "https://image.tmdb.org/*"
+    "https://image.tmdb.org/*",
+    "https://generativelanguage.googleapis.com/*"
   ],
   "background": {
     "service_worker": "src/background.js"
