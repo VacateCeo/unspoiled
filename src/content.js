@@ -33,10 +33,13 @@ let geminiKey = "";
 const processedIds = new Set(); // status IDs (or element refs on non-X platforms) already sent to Gemini
 const processedTexts = new Map(); // key → postText so we can re-attach flag on scroll-back
 const spoilerIds = new Map();   // key → postText for confirmed spoilers — re-blur on scroll
+const spoilerShowIds = new Map(); // key → showId that triggered the blur
 const activeFeedbackBars = new Map(); // postId → bar element for bars currently visible
 let keywords = [];
 let total = 0;
 let passed = 0;
+let currentSelectors = null;
+let stylesInjected = false;
 
 function buildKeywords(list) {
   const articles = new Set(["the", "a", "an"]);
@@ -96,6 +99,18 @@ function extractPostText(el, selectors) {
   return { text: "image post", source: "fallback" };
 }
 
+function preBlur(el) {
+  if (el.dataset.unspoiledPreblur || el.dataset.unspoiled) return;
+  el.dataset.unspoiledPreblur = "pending";
+  el.style.visibility = "hidden"; // hide content instantly while Gemini responds
+}
+
+function removePreBlur(el) {
+  if (!el.dataset.unspoiledPreblur) return;
+  delete el.dataset.unspoiledPreblur;
+  el.style.visibility = "";
+}
+
 function passesKeywordFilter(text) {
   const lower = text.toLowerCase();
   return keywords.some((kw) => lower.includes(kw));
@@ -107,15 +122,80 @@ async function init() {
   geminiKey = data.geminiKey || "";
   console.log("[Unspoiled] blocklist:", blocklist, "geminiKey length:", geminiKey?.length);
 
-  if (!geminiKey || blocklist.length === 0) return;
+  currentSelectors = getSelectors();
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (changes.geminiKey) geminiKey = changes.geminiKey.newValue || "";
+    if (changes.blocklist) {
+      const newBlocklist = changes.blocklist.newValue || [];
+      const oldBlocklist = blocklist;
+      const removedShows = oldBlocklist.filter(
+        (show) => !newBlocklist.some((s) => (s.id && show.id) ? s.id === show.id : s.title === show.title)
+      );
+      const addedShows = newBlocklist.filter(
+        (show) => !oldBlocklist.some((s) => (s.id && show.id) ? s.id === show.id : s.title === show.title)
+      );
+      blocklist = newBlocklist;
+      keywords = buildKeywords(blocklist);
+      if (removedShows.length > 0) unblurRemovedShows(removedShows);
+      if (addedShows.length > 0) scanAllVisiblePosts();
+    }
+  });
+
+  if (!geminiKey || blocklist.length === 0 || !currentSelectors) return;
 
   keywords = buildKeywords(blocklist);
-  const selectors = getSelectors();
-  if (!selectors) return;
-
   injectStyles();
-  scanPage(selectors);
-  observePage(selectors);
+  stylesInjected = true;
+  scanPage(currentSelectors);
+  observePage(currentSelectors);
+}
+
+function unblurRemovedShows(removedShows) {
+  for (const show of removedShows) {
+    const showId = String(show.id || show.title);
+    document.querySelectorAll(`.unspoiled-overlay[data-unspoiled-show="${CSS.escape(showId)}"]`).forEach((overlay) => {
+      const container = overlay.parentNode;
+      if (!container) { overlay.remove(); return; }
+      const el = [...container.children].find((child) => child.dataset.unspoiled === "blurred");
+      if (!el) { overlay.remove(); return; }
+
+      const key = el.dataset.statusId || el;
+      const postText = spoilerIds.get(key) || processedTexts.get(key) || "";
+
+      // Keep blurred if post still matches a remaining show
+      if (postText && keywords.some((kw) => postText.toLowerCase().includes(kw))) return;
+
+      el.style.filter = "";
+      el.style.pointerEvents = "";
+      delete el.dataset.unspoiled;
+      overlay.remove();
+      spoilerIds.delete(key);
+      spoilerShowIds.delete(key);
+      processedIds.delete(key); // allow re-evaluation if show is re-added
+      addFlagButton(el, key, postText);
+    });
+  }
+}
+
+function scanAllVisiblePosts() {
+  if (!currentSelectors || !geminiKey || blocklist.length === 0) return;
+  if (!stylesInjected) {
+    injectStyles();
+    stylesInjected = true;
+    observePage(currentSelectors);
+  }
+  scanPage(currentSelectors);
+}
+
+function findMatchingShowId(text) {
+  const lower = text.toLowerCase();
+  for (const show of blocklist) {
+    const showKws = buildKeywords([show]);
+    if (showKws.some((kw) => lower.includes(kw))) return String(show.id || show.title);
+  }
+  return null;
 }
 
 function scanPage(selectors) {
@@ -125,7 +205,10 @@ function scanPage(selectors) {
 function getFeedContainer() {
   const host = location.hostname;
   if (host.includes("x.com") || host.includes("twitter.com")) {
-    return document.querySelector('div[data-testid="primaryColumn"]') || document.body;
+    // primaryColumn covers most views; main[role="main"] covers x.com/home and some SPAs
+    return document.querySelector('div[data-testid="primaryColumn"]')
+      || document.querySelector('main[role="main"]')
+      || document.body;
   }
   if (host.includes("reddit.com")) {
     return document.querySelector("shreddit-feed, .ListingLayout-outerContainer, main") || document.body;
@@ -162,7 +245,7 @@ function enqueue(el, selectors) {
 
   if (processedIds.has(key)) {
     if (spoilerIds.has(key)) {
-      blurPost(el, spoilerIds.get(key)); // re-blur on scroll
+      blurPost(el, spoilerIds.get(key), spoilerShowIds.get(key)); // re-blur on scroll
     } else {
       addFlagButton(el, key, processedTexts.get(key)); // re-attach flag to recreated element
     }
@@ -178,6 +261,7 @@ function enqueue(el, selectors) {
   if (!passesKeywordFilter(text)) return;
   passed++;
   console.log("[Unspoiled] scanned:", total, "keyword-passed:", passed);
+  preBlur(el);
   classifyBatch([{ el, text, key }]);
 }
 
@@ -204,6 +288,7 @@ async function classifyBatch(batch) {
     const data = await res.json();
     console.log("[Unspoiled] Gemini response:", JSON.stringify(data));
     if (data.error) {
+      batch.forEach(({ el }) => removePreBlur(el));
       console.error("Gemini classify error:", data.error.message || "Gemini API error");
       return;
     }
@@ -212,13 +297,18 @@ async function classifyBatch(batch) {
     const answers = raw.trim().split("\n").map((l) => l.trim().toUpperCase());
     batch.forEach(({ el, text, key }, i) => {
       if (answers[i]?.startsWith("YES")) {
+        const showId = findMatchingShowId(text);
         spoilerIds.set(key, text);
+        spoilerShowIds.set(key, showId);
         if (typeof key === "string") el.dataset.statusId = key;
-        blurPost(el, text);
+        blurPost(el, text, showId); // blurPost clears the pre-blur internally
         console.log("[Unspoiled] blurring post:", text.slice(0, 50));
+      } else {
+        removePreBlur(el); // Gemini said NO — restore visibility
       }
     });
   } catch (err) {
+    batch.forEach(({ el }) => removePreBlur(el));
     console.error("Gemini classify error:", err);
   }
 }
@@ -262,14 +352,17 @@ function showToast(message) {
   }, 2000);
 }
 
-function blurPost(el, postText) {
+function blurPost(el, postText, showId = null) {
   if (el.dataset.unspoiled) return;
   el.dataset.unspoiled = "blurred";
   el.querySelector(".unspoiled-flag-btn")?.remove();
 
+  // Apply filter before restoring visibility — no intermediate flash
   el.style.filter = "blur(20px) brightness(0.3)";
   el.style.transition = "filter 0.3s";
   el.style.pointerEvents = "none";
+  delete el.dataset.unspoiledPreblur;
+  el.style.visibility = "";
 
   const container = el.parentNode;
   if (window.getComputedStyle(container).position === "static") {
@@ -278,6 +371,7 @@ function blurPost(el, postText) {
 
   const overlay = document.createElement("div");
   overlay.className = "unspoiled-overlay";
+  if (showId) overlay.dataset.unspoiledShow = showId;
   overlay.innerHTML = `
     <div class="unspoiled-overlay-inner">
       <div class="unspoiled-title">🚫 Spoiler Hidden</div>
@@ -304,7 +398,7 @@ function showFeedbackBar(el, postId, postText) {
     <button class="unspoiled-fb-btn" data-action="spoiler">✓ Was a spoiler</button>
     <button class="unspoiled-fb-btn" data-action="false_positive">✗ Not a spoiler</button>
   `;
-  el.appendChild(bar); // inside the article, not as a sibling
+  document.body.appendChild(bar); // fixed to viewport — never inside article DOM
 
   if (postId) activeFeedbackBars.set(postId, bar);
 
@@ -331,11 +425,8 @@ function showFeedbackBar(el, postId, postText) {
   setTimeout(dismiss, 5000);
 }
 
-function reattachFeedbackBar(el) {
-  const id = getStatusId(el);
-  if (!id || !activeFeedbackBars.has(id)) return;
-  const bar = activeFeedbackBars.get(id);
-  if (!el.contains(bar)) el.appendChild(bar);
+function reattachFeedbackBar(_el) {
+  // no-op: feedback bar lives in document.body (position:fixed), not in article DOM
 }
 
 function injectStyles() {
@@ -414,31 +505,36 @@ function injectStyles() {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     .unspoiled-feedback-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      background: rgba(0, 0, 0, 0.06);
-      border-radius: 8px;
-      margin: 4px 12px 8px;
+      justify-content: center;
+      gap: 12px;
+      padding: 10px 16px;
+      background: rgba(15, 15, 15, 0.92);
+      backdrop-filter: blur(8px);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      z-index: 99999;
     }
     .unspoiled-feedback-label {
-      font-size: 12px;
-      color: #555;
-      flex: 1;
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.85);
     }
     .unspoiled-fb-btn {
-      padding: 4px 12px;
+      padding: 5px 14px;
       border-radius: 999px;
-      border: 1px solid #ccc;
-      background: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      background: rgba(255, 255, 255, 0.12);
       font-size: 12px;
       cursor: pointer;
-      color: #333;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     .unspoiled-fb-btn:hover {
-      background: #f0f0f0;
+      background: rgba(255, 255, 255, 0.22);
     }
   `;
   document.head.appendChild(style);
