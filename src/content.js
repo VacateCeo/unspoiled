@@ -138,8 +138,14 @@ async function init() {
       );
       blocklist = newBlocklist;
       keywords = buildKeywords(blocklist);
-      if (removedShows.length > 0) unblurRemovedShows(removedShows);
-      if (addedShows.length > 0) scanAllVisiblePosts();
+      if (removedShows.length > 0) {
+        unblurRemovedShows(removedShows);
+        scanAllVisiblePosts(); // re-evaluate visible posts whose blur was removed
+      }
+      if (addedShows.length > 0) {
+        processedIds.clear(); // force re-evaluation of all visible posts against new show
+        scanAllVisiblePosts();
+      }
     }
   });
 
@@ -186,6 +192,8 @@ function scanAllVisiblePosts() {
     stylesInjected = true;
     observePage(currentSelectors);
   }
+  const count = document.querySelectorAll(currentSelectors.post).length;
+  console.log(`[Unspoiled] rescanning ${count} visible posts after blocklist change`);
   scanPage(currentSelectors);
 }
 
