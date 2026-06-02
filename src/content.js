@@ -1,7 +1,6 @@
 console.log("[Unspoiled] content script loaded");
 
-const GEMINI_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+const API_URL = "https://unspoiled-api-sable.vercel.app/api/classify";
 
 // Selectors per platform
 function getSelectors() {
@@ -29,8 +28,7 @@ function getSelectors() {
 }
 
 let blocklist = [];
-let geminiKey = "";
-const processedIds = new Set(); // status IDs (or element refs on non-X platforms) already sent to Gemini
+const processedIds = new Set(); // status IDs (or element refs on non-X platforms) already classified
 const processedTexts = new Map(); // key → postText so we can re-attach flag on scroll-back
 const spoilerIds = new Map();   // key → postText for confirmed spoilers — re-blur on scroll
 const spoilerShowIds = new Map(); // key → showId that triggered the blur
@@ -95,7 +93,7 @@ function extractPostText(el, selectors) {
     .join(" ");
   if (spanText) return { text: spanText, source: "spans" };
 
-  // 5. Give up — keyword filter will reject this naturally, no Gemini call wasted
+  // 5. Give up — keyword filter will reject this naturally, no API call wasted
   return { text: "image post", source: "fallback" };
 }
 
@@ -117,16 +115,14 @@ function passesKeywordFilter(text) {
 }
 
 async function init() {
-  const data = await chrome.storage.local.get(["blocklist", "geminiKey"]);
+  const data = await chrome.storage.local.get(["blocklist"]);
   blocklist = data.blocklist || [];
-  geminiKey = data.geminiKey || "";
-  console.log("[Unspoiled] blocklist:", blocklist, "geminiKey length:", geminiKey?.length);
+  console.log("[Unspoiled] blocklist:", blocklist);
 
   currentSelectors = getSelectors();
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
-    if (changes.geminiKey) geminiKey = changes.geminiKey.newValue || "";
     if (changes.blocklist) {
       const newBlocklist = changes.blocklist.newValue || [];
       const oldBlocklist = blocklist;
@@ -149,7 +145,7 @@ async function init() {
     }
   });
 
-  if (!geminiKey || blocklist.length === 0 || !currentSelectors) return;
+  if (blocklist.length === 0 || !currentSelectors) return;
 
   keywords = buildKeywords(blocklist);
   injectStyles();
@@ -186,7 +182,7 @@ function unblurRemovedShows(removedShows) {
 }
 
 function scanAllVisiblePosts() {
-  if (!currentSelectors || !geminiKey || blocklist.length === 0) return;
+  if (!currentSelectors || blocklist.length === 0) return;
   if (!stylesInjected) {
     injectStyles();
     stylesInjected = true;
@@ -274,50 +270,44 @@ function enqueue(el, selectors) {
 }
 
 async function classifyBatch(batch) {
-  const shows = blocklist
-    .map((s) => `${s.title}${s.year ? " (" + s.year + ")" : ""}`)
-    .join(", ");
-
-  const prompt = `Does this social media post reference, discuss, or relate to ${shows}? This includes fan art, memes, character mentions, plot references, or any content about the show. Reply with only YES or NO.\n\nPost: ${batch[0].text.slice(0, 400)}`;
+  const posts = batch.map(({ text, key }, i) => ({
+    id: typeof key === "string" ? key : `p${i}`,
+    text,
+  }));
 
   try {
-    const res = await fetch(GEMINI_URL, {
+    const res = await fetch(API_URL, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": geminiKey,
-      },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: "You are a content filter. Respond with only YES or NO, nothing else." }] },
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0, maxOutputTokens: 50, thinkingConfig: { thinkingBudget: 0 } },
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ posts, blocklist }),
     });
-    const data = await res.json();
-    console.log("[Unspoiled] Gemini response:", JSON.stringify(data));
-    if (data.error) {
+
+    if (!res.ok) {
       batch.forEach(({ el }) => removePreBlur(el));
-      console.error("Gemini classify error:", data.error.message || "Gemini API error");
+      console.error("[Unspoiled] API error:", res.status);
       return;
     }
-    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    console.log("[Unspoiled] Gemini raw text:", JSON.stringify(raw));
-    const answers = raw.trim().split("\n").map((l) => l.trim().toUpperCase());
+
+    const data = await res.json();
+    console.log("[Unspoiled] classify response:", data);
+    const resultMap = new Map(data.results.map((r) => [String(r.id), r.spoiler]));
+
     batch.forEach(({ el, text, key }, i) => {
-      if (answers[i]?.startsWith("YES")) {
+      const postId = typeof key === "string" ? key : `p${i}`;
+      if (resultMap.get(postId) === true) {
         const showId = findMatchingShowId(text);
         spoilerIds.set(key, text);
         spoilerShowIds.set(key, showId);
         if (typeof key === "string") el.dataset.statusId = key;
-        blurPost(el, text, showId); // blurPost clears the pre-blur internally
+        blurPost(el, text, showId);
         console.log("[Unspoiled] blurring post:", text.slice(0, 50));
       } else {
-        removePreBlur(el); // Gemini said NO — restore visibility
+        removePreBlur(el);
       }
     });
   } catch (err) {
     batch.forEach(({ el }) => removePreBlur(el));
-    console.error("Gemini classify error:", err);
+    console.error("[Unspoiled] classify error:", err);
   }
 }
 
