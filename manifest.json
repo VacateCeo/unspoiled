@@ -35,5 +35,11 @@
   "action": {
     "default_popup": "src/popup.html",
     "default_title": "Unspoiled"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["src/welcome.html"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

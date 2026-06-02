@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Welcome to Unspoiled</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f0f0f;
+      color: #f0f0f0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 48px 20px;
+    }
+
+    .container {
+      max-width: 600px;
+      width: 100%;
+      text-align: center;
+    }
+
+    .logo {
+      font-size: 48px;
+      font-weight: 800;
+      letter-spacing: -2px;
+      color: #ffffff;
+      margin-bottom: 14px;
+    }
+
+    .tagline {
+      font-size: 17px;
+      color: #888;
+      line-height: 1.55;
+      margin-bottom: 52px;
+    }
+
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 44px;
+      text-align: left;
+    }
+
+    .step-card {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 20px 22px;
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+    }
+
+    .step-number {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: #ffffff;
+      color: #0f0f0f;
+      font-size: 13px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .step-content h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #ffffff;
+      margin-bottom: 4px;
+      line-height: 1.4;
+    }
+
+    .step-content p {
+      font-size: 13px;
+      color: #666;
+      line-height: 1.5;
+    }
+
+    .cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #ffffff;
+      color: #0f0f0f;
+      border: none;
+      border-radius: 999px;
+      padding: 14px 36px;
+      font-size: 15px;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      margin-bottom: 36px;
+    }
+
+    .cta:hover { background: #e8e8e8; }
+    .cta:active { transform: scale(0.97); }
+
+    .platforms {
+      font-size: 12px;
+      color: #444;
+      letter-spacing: 0.2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">Unspoiled</div>
+    <p class="tagline">Browse without spoilers.<br>AI-powered protection for TV shows and movies.</p>
+
+    <div class="steps">
+      <div class="step-card">
+        <div class="step-number">1</div>
+        <div class="step-content">
+          <h3>Click the Unspoiled icon in your toolbar</h3>
+          <p>Pin the extension for easy access, then open it to manage your watchlist.</p>
+        </div>
+      </div>
+      <div class="step-card">
+        <div class="step-number">2</div>
+        <div class="step-content">
+          <h3>Search for a show you're watching</h3>
+          <p>Find any TV show or movie and add it to your protected list.</p>
+        </div>
+      </div>
+      <div class="step-card">
+        <div class="step-number">3</div>
+        <div class="step-content">
+          <h3>Browse freely — spoilers are automatically hidden</h3>
+          <p>Unspoiled scans posts in real time and blurs anything that could ruin the story.</p>
+        </div>
+      </div>
+    </div>
+
+    <button class="cta" id="get-started">Get Started →</button>
+
+    <p class="platforms">Works on X / Twitter, Reddit, and YouTube</p>
+  </div>
+
+  <script>
+    document.getElementById("get-started").addEventListener("click", () => {
+      window.close();
+    });
+  </script>
+</body>
+</html>
