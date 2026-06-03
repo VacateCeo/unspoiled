@@ -2,26 +2,33 @@ console.log("[Unspoiled] content script loaded");
 
 const API_URL = "https://unspoiled-api-sable.vercel.app/api/classify";
 
-// Selectors per platform
+// Selectors per platform — old.reddit.com must be checked before reddit.com
 function getSelectors() {
   const host = location.hostname;
   if (host.includes("x.com") || host.includes("twitter.com")) {
     return {
       post: 'article[data-testid="tweet"]',
       text: '[data-testid="tweetText"]',
+      platform: "x",
+    };
+  }
+  if (host === "old.reddit.com") {
+    return {
+      post: "div.thing.link, div.comment",
+      platform: "old-reddit",
     };
   }
   if (host.includes("reddit.com")) {
     return {
-      // Covers new Reddit, shreddit (redesign), and old Reddit
-      post: 'shreddit-post, [data-testid="post-container"], .thing.link',
-      text: '[data-testid="post-title-text"], [slot="title"], .title > a.may-blank',
+      post: 'shreddit-post, div[data-testid="post-container"], div[data-testid="comment"]',
+      platform: "new-reddit",
     };
   }
   if (host.includes("youtube.com")) {
     return {
       post: "ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer",
       text: "#video-title",
+      platform: "youtube",
     };
   }
   return null;
@@ -57,11 +64,19 @@ function buildKeywords(list) {
   return [...kws];
 }
 
-function getStatusId(el) {
-  const link = el.querySelector('a[href*="/status/"]');
-  if (!link) return null;
-  const match = link.href.match(/\/status\/(\d+)/);
-  return match ? match[1] : null;
+function getPostId(el) {
+  // X/Twitter: numeric status ID from tweet URL
+  const tweetLink = el.querySelector('a[href*="/status/"]');
+  if (tweetLink) {
+    const m = tweetLink.href.match(/\/status\/(\d+)/);
+    if (m) return m[1];
+  }
+  // Reddit: fullname attribute present on both old Reddit (div.thing) and
+  // some new Reddit elements (t3_xxx for posts, t1_xxx for comments)
+  if (el.dataset.fullname) return el.dataset.fullname;
+  // shreddit-post uses its id attribute as the fullname
+  if (el.tagName?.toLowerCase() === "shreddit-post" && el.id) return el.id;
+  return null;
 }
 
 const UI_CHROME = new Set([
@@ -70,22 +85,25 @@ const UI_CHROME = new Set([
 ]);
 
 function extractPostText(el, selectors) {
-  // 1. tweetText span
+  if (selectors.platform === "new-reddit") return extractNewRedditText(el);
+  if (selectors.platform === "old-reddit") return extractOldRedditText(el);
+
+  // X and YouTube: try platform-specific text selector first
   const bodyText = el.querySelector(selectors.text)?.innerText?.trim();
   if (bodyText) return { text: bodyText, source: "tweetText" };
 
-  // 2. aria-label on article (X encodes full tweet content here)
+  // aria-label on article (X encodes full tweet content here)
   const ariaLabel = el.getAttribute("aria-label")?.trim();
   if (ariaLabel) return { text: ariaLabel, source: "aria-label" };
 
-  // 3. img alt text (user-provided captions on media)
+  // img alt text (user-provided captions on media)
   const imgAlts = [...el.querySelectorAll("img[alt]")]
     .map((img) => img.alt.trim())
     .filter(Boolean)
     .join(" ");
   if (imgAlts) return { text: imgAlts, source: "img-alt" };
 
-  // 4. Leaf spans, excluding UI chrome labels and bare numbers
+  // Leaf spans, excluding UI chrome labels and bare numbers
   const spanText = [...el.querySelectorAll("span")]
     .filter((s) => !s.querySelector("span")) // leaf nodes only — avoid duplicating parent text
     .map((s) => s.innerText?.trim())
@@ -93,8 +111,37 @@ function extractPostText(el, selectors) {
     .join(" ");
   if (spanText) return { text: spanText, source: "spans" };
 
-  // 5. Give up — keyword filter will reject this naturally, no API call wasted
+  // Give up — keyword filter will reject this naturally, no API call wasted
   return { text: "image post", source: "fallback" };
+}
+
+function extractNewRedditText(el) {
+  // Comment: data-testid="comment" — grab only the first few paragraphs to
+  // avoid pulling in nested child-comment text that lives later in the DOM
+  if (el.dataset.testid === "comment") {
+    const body = [...el.querySelectorAll("p")]
+      .slice(0, 6)
+      .map((p) => p.innerText?.trim())
+      .filter(Boolean)
+      .join(" ");
+    return { text: body || "comment", source: "reddit-new-comment" };
+  }
+  // Post (shreddit-post or div[data-testid="post-container"])
+  const title = (el.querySelector("h1") || el.querySelector('[slot="title"]'))?.innerText?.trim();
+  const body = el.querySelector('[slot="text-body"]')?.innerText?.trim();
+  return { text: [title, body].filter(Boolean).join(" ") || "reddit post", source: "reddit-new-post" };
+}
+
+function extractOldRedditText(el) {
+  // Comment: div.comment
+  if (el.classList.contains("comment")) {
+    const body = el.querySelector("div.usertext-body")?.innerText?.trim();
+    return { text: body || "comment", source: "reddit-old-comment" };
+  }
+  // Post: div.thing.link
+  const title = el.querySelector("a.title")?.innerText?.trim();
+  const body = el.querySelector("div.md")?.innerText?.trim();
+  return { text: [title, body].filter(Boolean).join(" ") || "reddit post", source: "reddit-old-post" };
 }
 
 function preBlur(el) {
@@ -214,6 +261,9 @@ function getFeedContainer() {
       || document.querySelector('main[role="main"]')
       || document.body;
   }
+  if (host === "old.reddit.com") {
+    return document.querySelector("#siteTable, .content[role='main']") || document.body;
+  }
   if (host.includes("reddit.com")) {
     return document.querySelector("shreddit-feed, .ListingLayout-outerContainer, main") || document.body;
   }
@@ -244,8 +294,8 @@ function observePage(selectors) {
 }
 
 function enqueue(el, selectors) {
-  const id = getStatusId(el);
-  const key = id || el; // fall back to element ref on non-X platforms
+  const id = getPostId(el);
+  const key = id || el; // fall back to element ref when no stable ID is found
 
   if (processedIds.has(key)) {
     if (spoilerIds.has(key)) {
