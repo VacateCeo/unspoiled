@@ -11,17 +11,10 @@ function getSelectors() {
       text: '[data-testid="tweetText"]',
     };
   }
-  if (host.includes("reddit.com")) {
-    return {
-      // Covers new Reddit, shreddit (redesign), and old Reddit
-      post: 'shreddit-post, [data-testid="post-container"], .thing.link',
-      text: '[data-testid="post-title-text"], [slot="title"], .title > a.may-blank',
-    };
-  }
   if (host.includes("youtube.com")) {
     return {
-      post: "ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer",
-      text: "#video-title",
+      post: "ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, ytd-comment-thread-renderer, ytd-reel-item-renderer, ytd-short-video-view-model, ytd-reel-video-renderer",
+      text: "#video-title, #content-text",
     };
   }
   return null;
@@ -152,6 +145,9 @@ async function init() {
   stylesInjected = true;
   scanPage(currentSelectors);
   observePage(currentSelectors);
+  if (location.hostname.includes("youtube.com")) {
+    observeYouTubeSidebar(currentSelectors);
+  }
 }
 
 function unblurRemovedShows(removedShows) {
@@ -160,7 +156,10 @@ function unblurRemovedShows(removedShows) {
     document.querySelectorAll(`.unspoiled-overlay[data-unspoiled-show="${CSS.escape(showId)}"]`).forEach((overlay) => {
       const container = overlay.parentNode;
       if (!container) { overlay.remove(); return; }
-      const el = [...container.children].find((child) => child.dataset.unspoiled === "blurred");
+      // YouTube overlays live inside the blurred element itself; X overlays are siblings of it
+      const el = container.dataset.unspoiled === "blurred"
+        ? container
+        : [...container.children].find((child) => child.dataset.unspoiled === "blurred");
       if (!el) { overlay.remove(); return; }
 
       const key = el.dataset.statusId || el;
@@ -171,6 +170,7 @@ function unblurRemovedShows(removedShows) {
 
       el.style.filter = "";
       el.style.pointerEvents = "";
+      el.style.visibility = "";
       delete el.dataset.unspoiled;
       overlay.remove();
       spoilerIds.delete(key);
@@ -214,11 +214,13 @@ function getFeedContainer() {
       || document.querySelector('main[role="main"]')
       || document.body;
   }
-  if (host.includes("reddit.com")) {
-    return document.querySelector("shreddit-feed, .ListingLayout-outerContainer, main") || document.body;
-  }
   if (host.includes("youtube.com")) {
-    return document.querySelector("ytd-page-manager") || document.body;
+    const pageManager = document.querySelector("ytd-page-manager");
+    const sidebar = document.querySelector("#secondary");
+    // The sidebar (#secondary, holding ytd-compact-video-renderer) must be inside the
+    // observed subtree — fall back to document.body if it isn't (or doesn't exist yet)
+    if (pageManager && (!sidebar || pageManager.contains(sidebar))) return pageManager;
+    return document.body;
   }
   return document.body;
 }
@@ -241,6 +243,42 @@ function observePage(selectors) {
     }
   });
   observer.observe(container, { childList: true, subtree: true });
+}
+
+// YouTube's #secondary sidebar (ytd-compact-video-renderer suggestions on watch pages) sits
+// outside the scope the main feed observer reliably covers, so it gets its own watcher: an
+// initial scan (its items are usually already in the DOM by the time we run) plus a dedicated
+// MutationObserver — both feeding the same keyword filter → classify → blur pipeline as the feed.
+function observeYouTubeSidebar(selectors) {
+  const attach = (sidebar) => {
+    sidebar.querySelectorAll(selectors.post).forEach((el) => enqueue(el, selectors));
+
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType !== Node.ELEMENT_NODE) continue;
+          if (node.matches?.(selectors.post)) enqueue(node, selectors);
+          node.querySelectorAll?.(selectors.post).forEach((el) => enqueue(el, selectors));
+        }
+      }
+    });
+    observer.observe(sidebar, { childList: true, subtree: true });
+  };
+
+  const sidebar = document.querySelector("#secondary");
+  if (sidebar) {
+    attach(sidebar);
+    return;
+  }
+
+  // #secondary isn't rendered yet (e.g. landed on a non-watch page first) — wait for it
+  const watcher = new MutationObserver(() => {
+    const el = document.querySelector("#secondary");
+    if (!el) return;
+    watcher.disconnect();
+    attach(el);
+  });
+  watcher.observe(document.body, { childList: true, subtree: true });
 }
 
 function enqueue(el, selectors) {
@@ -350,8 +388,48 @@ function showToast(message) {
   }, 2000);
 }
 
+function blurYouTubePost(el, postText, showId = null) {
+  // YouTube post cards share a parent container — never blur it, only the matched card itself
+  if (!currentSelectors || !el.matches(currentSelectors.post)) return;
+
+  el.dataset.unspoiled = "blurred";
+  el.querySelector(".unspoiled-flag-btn")?.remove();
+
+  if (window.getComputedStyle(el).position === "static") {
+    el.style.position = "relative";
+  }
+  delete el.dataset.unspoiledPreblur;
+  el.style.visibility = "hidden"; // hides el's content; overlay opts back into visible below
+
+  const overlay = document.createElement("div");
+  overlay.className = "unspoiled-overlay unspoiled-yt-overlay";
+  if (showId) overlay.dataset.unspoiledShow = showId;
+  overlay.innerHTML = `
+    <div class="unspoiled-overlay-inner">
+      <div class="unspoiled-title">🚫 Spoiler Hidden</div>
+      <button class="unspoiled-reveal-btn" type="button">Click to reveal</button>
+    </div>
+  `;
+  el.appendChild(overlay);
+
+  overlay.querySelector(".unspoiled-reveal-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    el.style.visibility = "";
+    el.dataset.unspoiled = "revealed";
+    overlay.remove();
+    showFeedbackBar(el, el.dataset.statusId || null, postText);
+  });
+}
+
 function blurPost(el, postText, showId = null) {
   if (el.dataset.unspoiled) return;
+
+  if (location.hostname.includes("youtube.com")) {
+    blurYouTubePost(el, postText, showId);
+    return;
+  }
+
   el.dataset.unspoiled = "blurred";
   el.querySelector(".unspoiled-flag-btn")?.remove();
 
@@ -501,6 +579,25 @@ function injectStyles() {
       color: rgba(255, 255, 255, 0.7);
       font-size: 12px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .unspoiled-yt-overlay {
+      visibility: visible; /* opt out of the blurred element's visibility: hidden */
+      cursor: default;
+    }
+    .unspoiled-reveal-btn {
+      pointer-events: auto;
+      padding: 6px 16px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .unspoiled-reveal-btn:hover {
+      background: rgba(255, 255, 255, 0.28);
     }
     .unspoiled-feedback-bar {
       position: fixed;
