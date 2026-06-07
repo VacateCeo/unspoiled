@@ -13,7 +13,7 @@ function getSelectors() {
   }
   if (host.includes("youtube.com")) {
     return {
-      post: "ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, ytd-comment-thread-renderer, ytd-reel-item-renderer, ytd-short-video-view-model, ytd-reel-video-renderer",
+      post: "ytd-rich-item-renderer, ytd-video-renderer, yt-lockup-view-model, ytd-grid-video-renderer, ytd-comment-thread-renderer, ytd-reel-item-renderer, ytd-short-video-view-model, ytd-reel-video-renderer",
       text: "#video-title, #content-text",
     };
   }
@@ -63,6 +63,17 @@ const UI_CHROME = new Set([
 ]);
 
 function extractPostText(el, selectors) {
+  // YouTube sidebar lockup: innerText is "title\nchannel\nviews…" — first line is the title
+  if (el.tagName?.toLowerCase() === "yt-lockup-view-model") {
+    const titleEl =
+      el.querySelector("#video-title") ||
+      el.querySelector("h3") ||
+      el.querySelector("[title]");
+    const title = titleEl?.textContent?.trim() || titleEl?.getAttribute("title") || "";
+    console.log("[Unspoiled] yt-lockup title extracted:", title.slice(0, 80));
+    return { text: title || "video", source: "yt-lockup" };
+  }
+
   // 1. tweetText span
   const bodyText = el.querySelector(selectors.text)?.innerText?.trim();
   if (bodyText) return { text: bodyText, source: "tweetText" };
@@ -204,6 +215,13 @@ function findMatchingShowId(text) {
 
 function scanPage(selectors) {
   document.querySelectorAll(selectors.post).forEach((el) => enqueue(el, selectors));
+
+  // Explicit pass for YouTube sidebar lockup cards — confirms they're actually present/found
+  if (location.hostname.includes("youtube.com")) {
+    const lockups = document.querySelectorAll("yt-lockup-view-model");
+    console.log("[Unspoiled] found yt-lockup-view-model:", lockups.length);
+    lockups.forEach((el) => enqueue(el, selectors));
+  }
 }
 
 function getFeedContainer() {
@@ -215,12 +233,7 @@ function getFeedContainer() {
       || document.body;
   }
   if (host.includes("youtube.com")) {
-    const pageManager = document.querySelector("ytd-page-manager");
-    const sidebar = document.querySelector("#secondary");
-    // The sidebar (#secondary, holding ytd-compact-video-renderer) must be inside the
-    // observed subtree — fall back to document.body if it isn't (or doesn't exist yet)
-    if (pageManager && (!sidebar || pageManager.contains(sidebar))) return pageManager;
-    return document.body;
+    return document.querySelector("ytd-page-manager") || document.body;
   }
   return document.body;
 }
@@ -239,41 +252,48 @@ function observePage(selectors) {
           enqueue(el, selectors);
           reattachFeedbackBar(el);
         });
+        // Explicit catch for YouTube sidebar lockup cards added dynamically
+        if (node.matches?.("yt-lockup-view-model")) enqueue(node, selectors);
+        node.querySelectorAll?.("yt-lockup-view-model").forEach((el) => enqueue(el, selectors));
       }
     }
   });
   observer.observe(container, { childList: true, subtree: true });
 }
 
-// YouTube's #secondary sidebar (ytd-compact-video-renderer suggestions on watch pages) sits
-// outside the scope the main feed observer reliably covers, so it gets its own watcher: an
-// initial scan (its items are usually already in the DOM by the time we run) plus a dedicated
-// MutationObserver — both feeding the same keyword filter → classify → blur pipeline as the feed.
+// YouTube's "up next" sidebar (yt-lockup-view-model cards inside
+// ytd-watch-next-secondary-results-renderer) sits outside the scope the main feed observer
+// reliably covers, so it gets its own watcher: an initial scan (its items are usually already
+// in the DOM by the time we run) plus a dedicated MutationObserver — both feeding the same
+// keyword filter → classify → blur pipeline as the feed.
 function observeYouTubeSidebar(selectors) {
-  const attach = (sidebar) => {
-    sidebar.querySelectorAll(selectors.post).forEach((el) => enqueue(el, selectors));
-
-    const observer = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        for (const node of mutation.addedNodes) {
-          if (node.nodeType !== Node.ELEMENT_NODE) continue;
-          if (node.matches?.(selectors.post)) enqueue(node, selectors);
-          node.querySelectorAll?.(selectors.post).forEach((el) => enqueue(el, selectors));
-        }
+  const scan = (container) => {
+    [...container.querySelectorAll("yt-lockup-view-model")].forEach((el, i) => {
+      if (i === 0 && el.innerText?.includes("Sponsored")) return;
+      const title = (el.innerText || "").split("\n")[0].trim();
+      if (!title) {
+        setTimeout(() => enqueue(el, selectors), 500);
+      } else {
+        enqueue(el, selectors);
       }
     });
-    observer.observe(sidebar, { childList: true, subtree: true });
   };
 
-  const sidebar = document.querySelector("#secondary");
-  if (sidebar) {
-    attach(sidebar);
+  const attach = (container) => {
+    setTimeout(() => scan(container), 1000);
+    const observer = new MutationObserver(() => scan(container));
+    observer.observe(container, { childList: true, subtree: true });
+  };
+
+  const container = document.querySelector("ytd-watch-next-secondary-results-renderer");
+  if (container) {
+    attach(container);
     return;
   }
 
-  // #secondary isn't rendered yet (e.g. landed on a non-watch page first) — wait for it
+  // Container isn't rendered yet (e.g. landed on a non-watch page first) — wait for it
   const watcher = new MutationObserver(() => {
-    const el = document.querySelector("#secondary");
+    const el = document.querySelector("ytd-watch-next-secondary-results-renderer");
     if (!el) return;
     watcher.disconnect();
     attach(el);
@@ -300,7 +320,12 @@ function enqueue(el, selectors) {
   processedTexts.set(key, text);
   total++;
   addFlagButton(el, key, text);
-  if (!passesKeywordFilter(text)) return;
+  if (!passesKeywordFilter(text)) {
+    if (location.hostname.includes("youtube.com")) {
+      console.log("[Unspoiled] keyword MISS:", text.slice(0, 80), "| keywords:", keywords.slice(0, 5));
+    }
+    return;
+  }
   passed++;
   console.log("[Unspoiled] scanned:", total, "keyword-passed:", passed);
   preBlur(el);
