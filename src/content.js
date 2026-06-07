@@ -385,6 +385,9 @@ async function classifyBatch(batch) {
         if (typeof key === "string") el.dataset.statusId = key;
         blurPost(el, text, showId);
         console.log("[Unspoiled] blurring post:", text.slice(0, 50));
+        chrome.storage.local.get(["spoilerCount"], (data) => {
+          chrome.storage.local.set({ spoilerCount: (data.spoilerCount || 0) + 1 });
+        });
       } else {
         removePreBlur(el);
       }
