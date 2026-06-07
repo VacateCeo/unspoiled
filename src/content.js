@@ -13,7 +13,7 @@ function getSelectors() {
   }
   if (host.includes("youtube.com")) {
     return {
-      post: "ytd-rich-item-renderer, ytd-video-renderer, yt-lockup-view-model, ytd-grid-video-renderer, ytd-comment-thread-renderer, ytd-reel-video-renderer, ytm-shorts-lockup-view-model, ytm-shorts-lockup-view-model-v2",
+      post: "ytd-rich-item-renderer, ytd-video-renderer, yt-lockup-view-model, ytd-grid-video-renderer, ytd-comment-thread-renderer, ytm-shorts-lockup-view-model, ytm-shorts-lockup-view-model-v2",
       text: "#video-title, #content-text",
     };
   }
@@ -73,6 +73,14 @@ function extractPostText(el, selectors) {
     const titleEl = el.querySelector("h3 a span[role='text']") || el.querySelector("h3 a") || el.querySelector("h3");
     const title = titleEl?.textContent?.trim() || "";
     console.log("[Unspoiled] Shorts title extracted:", title.slice(0, 80));
+    if (!title) {
+      setTimeout(() => {
+        if (!el.dataset.unspoiled && !el.dataset.unspoiledPreblur) {
+          processedIds.delete(el);
+          enqueue(el, currentSelectors);
+        }
+      }, 1000);
+    }
     return { text: title || "short", source: "shorts" };
   }
 
@@ -438,6 +446,7 @@ function blurYouTubePost(el, postText, showId = null) {
   }
   delete el.dataset.unspoiledPreblur;
   el.style.visibility = "hidden"; // hides el's content; overlay opts back into visible below
+  el.querySelector("video")?.pause();
 
   const overlay = document.createElement("div");
   overlay.className = "unspoiled-overlay unspoiled-yt-overlay";
