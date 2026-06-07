@@ -70,7 +70,8 @@ function extractPostText(el, selectors) {
     return { text: title || "short", source: "shorts" };
   }
   if (el.tagName?.toLowerCase() === "ytm-shorts-lockup-view-model" || el.tagName?.toLowerCase() === "ytm-shorts-lockup-view-model-v2") {
-    const title = (el.innerText || "").split("\n")[0].trim();
+    const titleEl = el.querySelector("h3 a span[role='text']") || el.querySelector("h3 a") || el.querySelector("h3");
+    const title = titleEl?.textContent?.trim() || "";
     console.log("[Unspoiled] Shorts title extracted:", title.slice(0, 80));
     return { text: title || "short", source: "shorts" };
   }
