@@ -12,7 +12,6 @@
     "https://twitter.com/*",
     "https://x.com/*",
     "https://www.reddit.com/*",
-    "https://old.reddit.com/*",
     "https://www.youtube.com/*",
     "https://api.themoviedb.org/*",
     "https://image.tmdb.org/*",
@@ -27,7 +26,6 @@
         "https://twitter.com/*",
         "https://x.com/*",
         "https://www.reddit.com/*",
-        "https://old.reddit.com/*",
         "https://www.youtube.com/*"
       ],
       "js": ["src/content.js"],
