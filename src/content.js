@@ -13,7 +13,7 @@ function getSelectors() {
   }
   if (host.includes("youtube.com")) {
     return {
-      post: "ytd-rich-item-renderer, ytd-video-renderer, yt-lockup-view-model, ytd-grid-video-renderer, ytd-comment-thread-renderer, ytd-reel-item-renderer, ytd-short-video-view-model, ytd-reel-video-renderer",
+      post: "ytd-rich-item-renderer, ytd-video-renderer, yt-lockup-view-model, ytd-grid-video-renderer, ytd-comment-thread-renderer, ytd-reel-video-renderer, ytm-shorts-lockup-view-model, ytm-shorts-lockup-view-model-v2",
       text: "#video-title, #content-text",
     };
   }
@@ -63,6 +63,18 @@ const UI_CHROME = new Set([
 ]);
 
 function extractPostText(el, selectors) {
+  if (el.tagName?.toLowerCase() === "ytd-reel-video-renderer") {
+    const titleEl = el.querySelector("#title, h2, yt-formatted-string#video-title");
+    const title = titleEl?.textContent?.trim() || el.querySelector("[aria-label]")?.getAttribute("aria-label") || "";
+    console.log("[Unspoiled] Shorts title extracted:", title.slice(0, 80));
+    return { text: title || "short", source: "shorts" };
+  }
+  if (el.tagName?.toLowerCase() === "ytm-shorts-lockup-view-model" || el.tagName?.toLowerCase() === "ytm-shorts-lockup-view-model-v2") {
+    const title = (el.innerText || "").split("\n")[0].trim();
+    console.log("[Unspoiled] Shorts title extracted:", title.slice(0, 80));
+    return { text: title || "short", source: "shorts" };
+  }
+
   // YouTube sidebar lockup: innerText is "title\nchannel\nviews…" — first line is the title
   if (el.tagName?.toLowerCase() === "yt-lockup-view-model") {
     const titleEl =
