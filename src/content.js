@@ -13,7 +13,7 @@ function getSelectors() {
   }
   if (host.includes("youtube.com")) {
     return {
-      post: "ytd-rich-item-renderer, ytd-video-renderer, yt-lockup-view-model, ytd-grid-video-renderer, ytd-comment-thread-renderer, ytm-shorts-lockup-view-model, ytm-shorts-lockup-view-model-v2",
+      post: "ytd-rich-item-renderer, ytd-video-renderer, yt-lockup-view-model, ytd-grid-video-renderer, ytd-comment-thread-renderer, ytm-shorts-lockup-view-model, ytm-shorts-lockup-view-model-v2, ytd-reel-video-renderer",
       text: "#video-title, #content-text",
     };
   }
@@ -64,10 +64,19 @@ const UI_CHROME = new Set([
 
 function extractPostText(el, selectors) {
   if (el.tagName?.toLowerCase() === "ytd-reel-video-renderer") {
-    const titleEl = el.querySelector("#title, h2, yt-formatted-string#video-title");
-    const title = titleEl?.textContent?.trim() || el.querySelector("[aria-label]")?.getAttribute("aria-label") || "";
-    console.log("[Unspoiled] Shorts title extracted:", title.slice(0, 80));
-    return { text: title || "short", source: "shorts" };
+    const titleEl = el.querySelector("ytd-reel-player-overlay-renderer #title") ||
+      el.querySelector("#title") || el.querySelector("h2");
+    const title = titleEl?.textContent?.trim() || "";
+    console.log("[Unspoiled] Shorts player title extracted:", title.slice(0, 80));
+    if (!title) {
+      setTimeout(() => {
+        if (!el.dataset.unspoiled && !el.dataset.unspoiledPreblur) {
+          processedIds.delete(el);
+          enqueue(el, currentSelectors);
+        }
+      }, 800);
+    }
+    return { text: title || "short", source: "shorts-player" };
   }
   if (el.tagName?.toLowerCase() === "ytm-shorts-lockup-view-model" || el.tagName?.toLowerCase() === "ytm-shorts-lockup-view-model-v2") {
     const titleEl = el.querySelector("h3 a span[role='text']") || el.querySelector("h3 a") || el.querySelector("h3");
@@ -179,6 +188,7 @@ async function init() {
   observePage(currentSelectors);
   if (location.hostname.includes("youtube.com")) {
     observeYouTubeSidebar(currentSelectors);
+    observeYouTubeShorts(currentSelectors);
   }
 }
 
@@ -322,6 +332,16 @@ function observeYouTubeSidebar(selectors) {
   watcher.observe(document.body, { childList: true, subtree: true });
 }
 
+function observeYouTubeShorts(selectors) {
+  if (!location.pathname.startsWith("/shorts")) return;
+  const scan = () => {
+    document.querySelectorAll("ytd-reel-video-renderer").forEach((el) => enqueue(el, selectors));
+  };
+  setTimeout(scan, 800);
+  const observer = new MutationObserver(scan);
+  observer.observe(document.body, { childList: true, subtree: true });
+}
+
 function enqueue(el, selectors) {
   const id = getStatusId(el);
   const key = id || el; // fall back to element ref on non-X platforms
@@ -456,8 +476,9 @@ function blurYouTubePost(el, postText, showId = null) {
   if (showId) overlay.dataset.unspoiledShow = showId;
   overlay.innerHTML = `
     <div class="unspoiled-overlay-inner">
-      <div class="unspoiled-title">🚫 Spoiler Hidden</div>
-      <button class="unspoiled-reveal-btn" type="button">Click to reveal</button>
+      <div class="unspoiled-dots"><span class="ud ud1"></span><span class="ud ud2"></span><span class="ud ud3"></span></div>
+      <div class="unspoiled-wordmark">Unspoiled</div>
+      <button class="unspoiled-reveal-btn unspoiled-reveal-solid" type="button">Click to reveal</button>
     </div>
   `;
   el.appendChild(overlay);
@@ -500,13 +521,16 @@ function blurPost(el, postText, showId = null) {
   if (showId) overlay.dataset.unspoiledShow = showId;
   overlay.innerHTML = `
     <div class="unspoiled-overlay-inner">
-      <div class="unspoiled-title">🚫 Spoiler Hidden</div>
-      <div class="unspoiled-subtitle">Click to reveal</div>
+      <div class="unspoiled-dots"><span class="ud ud1"></span><span class="ud ud2"></span><span class="ud ud3"></span></div>
+      <div class="unspoiled-wordmark">Unspoiled</div>
+      <button class="unspoiled-reveal-btn unspoiled-reveal-solid" type="button">Click to reveal</button>
     </div>
   `;
   container.appendChild(overlay);
 
-  overlay.addEventListener("click", () => {
+  overlay.querySelector(".unspoiled-reveal-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
     el.style.filter = "none";
     el.style.pointerEvents = "";
     el.dataset.unspoiled = "revealed";
@@ -600,6 +624,37 @@ function injectStyles() {
       pointer-events: none;
       transition: opacity 0.3s;
     }
+    .unspoiled-dots {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 10px;
+    }
+    .unspoiled-dots .ud {
+      display: block;
+      border-radius: 50%;
+      background: #fb6f47;
+    }
+    .unspoiled-dots .ud1 { width: 13px; height: 13px; opacity: 1; }
+    .unspoiled-dots .ud2 { width: 10px; height: 10px; opacity: 0.58; }
+    .unspoiled-dots .ud3 { width: 7px; height: 7px; opacity: 0.25; }
+    .unspoiled-wordmark {
+      color: #fffdf9;
+      font-size: 20px;
+      font-weight: 700;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: -0.3px;
+      margin-bottom: 12px;
+    }
+    .unspoiled-reveal-solid {
+      background: #fb6f47 !important;
+      border: none !important;
+      color: #fffdf9 !important;
+      font-weight: 700 !important;
+    }
+    .unspoiled-reveal-solid:hover {
+      background: #e8512a !important;
+    }
     .unspoiled-overlay {
       position: absolute;
       inset: 0;
@@ -607,7 +662,7 @@ function injectStyles() {
       display: flex;
       align-items: center;
       justify-content: center;
-      background: rgba(0, 0, 0, 0.7);
+      background: rgba(20, 17, 14, 0.92);
       cursor: pointer;
     }
     .unspoiled-overlay-inner {
