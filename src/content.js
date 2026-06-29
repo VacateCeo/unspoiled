@@ -333,16 +333,47 @@ function observeYouTubeSidebar(selectors) {
 }
 
 function observeYouTubeShorts(selectors) {
-  if (!location.pathname.startsWith("/shorts")) return;
-  const scan = () => {
-    document.querySelectorAll("ytd-reel-video-renderer").forEach((el) => enqueue(el, selectors));
+  let lastShortsPath = null;
+
+  const scanCurrentShort = () => {
+    if (!location.pathname.startsWith("/shorts")) return;
+    const currentPath = location.pathname;
+    const el = document.querySelector("ytd-reel-video-renderer");
+    if (!el) return;
+
+    if (currentPath !== lastShortsPath) {
+      lastShortsPath = currentPath;
+      processedIds.delete(el);
+      spoilerIds.delete(el);
+      spoilerShowIds.delete(el);
+      processedTexts.delete(el);
+      delete el.dataset.unspoiled;
+      delete el.dataset.unspoiledPreblur;
+      el.style.visibility = "";
+      el.querySelector(".unspoiled-overlay")?.remove();
+      el.querySelector(".unspoiled-flag-btn")?.remove();
+    }
+
+    enqueue(el, selectors);
   };
-  setTimeout(scan, 800);
-  const observer = new MutationObserver(scan);
-  observer.observe(document.body, { childList: true, subtree: true });
+
+  if (location.pathname.startsWith("/shorts")) setTimeout(scanCurrentShort, 300);
+  navigation.addEventListener("navigate", () => setTimeout(scanCurrentShort, 300));
 }
 
 function enqueue(el, selectors) {
+  // YouTube wraps cards in grid containers (ytd-rich-item-renderer > yt-lockup-view-model);
+  // both match the post selector and would each get an overlay. Skip the wrapper when it
+  // contains a real card so only the inner card is blurred — avoids stacked double overlays.
+  const tag = el.tagName?.toLowerCase();
+  if (
+    location.hostname.includes("youtube.com") &&
+    (tag === "ytd-rich-item-renderer" || tag === "ytd-grid-video-renderer") &&
+    el.querySelector(selectors.post)
+  ) {
+    return;
+  }
+
   const id = getStatusId(el);
   const key = id || el; // fall back to element ref on non-X platforms
 
@@ -688,6 +719,7 @@ function injectStyles() {
     .unspoiled-yt-overlay {
       visibility: visible; /* opt out of the blurred element's visibility: hidden */
       cursor: default;
+      background: rgb(20, 17, 14); /* fully opaque — video/thumbnail cannot bleed through */
     }
     .unspoiled-reveal-btn {
       pointer-events: auto;
